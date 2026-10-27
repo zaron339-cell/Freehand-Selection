@@ -1,0 +1,68 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'io.freehand.selection'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.freehand.selection'
+        minSdk 26
+        targetSdk 36
+        versionCode 5
+        versionName '0.4.1-ball-history'
+        testInstrumentationRunner 'io.freehand.selection.SelectionInstrumentation'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+
+dependencies {
+    implementation 'io.noties.markwon:core:4.6.2'
+    implementation 'io.noties.markwon:ext-tables:4.6.2'
+    implementation 'io.noties.markwon:ext-strikethrough:4.6.2'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib-common:1.9.22'
+    implementation 'androidx.core:core:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime:2.7.0'
+    implementation 'androidx.annotation:annotation:1.7.0'
+    implementation 'com.google.guava:guava:27.0.1-android'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.10'
+    constraints {
+        implementation 'androidx.annotation:annotation-experimental:1.4.0'
+        implementation 'androidx.profileinstaller:profileinstaller:1.3.1'
+        implementation 'androidx.collection:collection:1.4.0'
+        implementation 'org.checkerframework:checker-compat-qual:2.5.3'
+    }
+}
+
+// Pure geometry checks run on the JVM, without a device or an Android mock.
+configurations { geometryRuntime }
+dependencies { geometryRuntime 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22' }
+def geometryOutput = layout.buildDirectory.dir('geometry-check')
+tasks.register('compileGeometryCheck', JavaExec) {
+    classpath = configurations.kotlinCompilerClasspath
+    mainClass = 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler'
+    doFirst {
+        geometryOutput.get().asFile.mkdirs()
+        args = ['-no-stdlib', '-no-reflect', '-jvm-target', '17',
+                '-classpath', configurations.geometryRuntime.asPath,
+                '-d', geometryOutput.get().asFile.absolutePath,
+                file('src/main/java/io/freehand/selection/geometry/SelectionGeometry.kt').absolutePath,
+                rootProject.file('tools/GeometryCheck.kt').absolutePath]
+    }
+}
+tasks.register('checkGeometry', JavaExec) {
+    dependsOn 'compileGeometryCheck'
+    classpath = files(geometryOutput) + configurations.geometryRuntime
+    mainClass = 'io.freehand.selection.geometry.GeometryCheckKt'
+}

@@ -1,0 +1,36 @@
+.gradle/
+.gradle-user/
+.android-user/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/
+dist/
+
+# Temporary document extracts and locally installed helper libraries
+/tmp/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+keystore.properties
+
+# Generated packages, logs and OS metadata
+*.apk
+*.aab
+*.log
+.DS_Store
+Thumbs.db
