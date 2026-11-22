@@ -267,20 +267,12 @@ internal class CaptureService : Service() {
                         try {
                             val overlay = SelectionOverlay(this, bitmap,
                                 onClose = { closeSelection(); showBall() },
-                                onShare = { image, completed ->
-                                    ImageSharing.share(this, image) { error ->
-                                        completed(error)
-                                        // A system overlay otherwise covers the newly opened share sheet.
-                                        if (error == null && !destroyed && generation == captureGeneration) {
-                                            closeSelection(); showBall()
-                                        }
-                                    }
-                                },
-                                onAsk = { image, question -> showAnswer(image, question) })
+                                onAsk = { image, question, hidden -> showAnswer(image, question, hiddenInitial = hidden) })
                             val params = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT,
                                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply {
                                 gravity = Gravity.TOP or Gravity.LEFT
+                                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                                 if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                                 if (Build.VERSION.SDK_INT >= 30) setFitInsetsTypes(0)
                             }
@@ -308,8 +300,8 @@ internal class CaptureService : Service() {
         selection = null
     }
 
-    private fun showAnswer(image: android.graphics.Bitmap, question: String, restored: ConversationRecord? = null) {
-        val panel = AiConversationView(this, image, question, restored) { closeAnswer(); showBall() }
+    private fun showAnswer(image: android.graphics.Bitmap, question: String, restored: ConversationRecord? = null, hiddenInitial: Boolean = true) {
+        val panel = AiConversationView(this, image, question, restored, hiddenInitial = hiddenInitial) { closeAnswer(); showBall() }
         val size = screenSize()
         val params = WindowManager.LayoutParams(minOf(dp(520), size.first - dp(24)),
             minOf(dp(680), size.second - dp(96)), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,

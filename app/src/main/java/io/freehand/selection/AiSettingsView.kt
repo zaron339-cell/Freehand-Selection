@@ -22,7 +22,7 @@ import io.freehand.selection.ai.AiProfileStore
 import io.freehand.selection.ai.AiProtocol
 import java.util.UUID
 
-internal class AiSettingsView(context: Context, private val onClose: () -> Unit) : ScrollView(context) {
+internal class AiSettingsView(context: Context, private val onSaved: () -> Unit = {}, private val onClose: () -> Unit) : ScrollView(context) {
     private val store = AiProfileStore(context)
     private val column = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -106,6 +106,7 @@ internal class AiSettingsView(context: Context, private val onClose: () -> Unit)
             runCatching { readFields().also { store.save(it) } }.onSuccess {
                 context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
                 close()
+                onSaved()
             }.onFailure { status.text = it.localizedMessage ?: "保存失败" }
         })
         column.addSpaced(actions)

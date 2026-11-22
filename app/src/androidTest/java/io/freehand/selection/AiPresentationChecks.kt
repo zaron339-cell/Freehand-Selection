@@ -48,7 +48,7 @@ internal class AiPresentationChecks(private val instrument: Instrumentation) {
     }
 
     fun run(): Int {
-        expect(AiWire.SYSTEM == "你是一位学习助手，请根据用户提供的内容和问题提供帮助。", "default prompt still prescribes an output structure or subject")
+        expect(AiWire.SYSTEM.contains("简短") && AiWire.SYSTEM.contains("明确"), "default prompt lacks adaptive concise behavior")
         val activity = instrument.startActivitySync(Intent(instrument.targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as Activity
         val prefix = "presentation-test-${UUID.randomUUID()}"
         val context = object : ContextWrapper(activity) {
@@ -148,7 +148,7 @@ internal class AiPresentationChecks(private val instrument: Instrumentation) {
                 var captured = ""
                 var overlay: SelectionOverlay? = null
                 instrument.runOnMainSync {
-                    overlay = SelectionOverlay(context, image(), {}, { _, _ -> }, { _, question -> captured = question })
+                    overlay = SelectionOverlay(context, image(), {}, { _, question, _ -> captured = question })
                     activity.setContentView(overlay)
                 }
                 instrument.waitForIdleSync()
@@ -165,11 +165,27 @@ internal class AiPresentationChecks(private val instrument: Instrumentation) {
                         canvas.onTouchEvent(event); event.recycle()
                     }
                     touch(MotionEvent.ACTION_DOWN, 20f); touch(MotionEvent.ACTION_UP, 160f)
-                    button(root, "预览选区").performClick()
-                    button(root, "AI 解题").performClick()
-                    expect(captured == "只翻译选区内容。", "solve action ignores user-defined prompt")
-                    button(root, "讲知识点").performClick()
-                    expect(captured == "结合历史背景讲解选区。自选形式。", "explain action ignores user-defined prompt")
+                    val originalWidth = root.width; val originalHeight = root.height
+                    val originalCanvasHeight = canvas.height
+                    val beforeResize = canvas.crop()!!
+                    root.measure(View.MeasureSpec.makeMeasureSpec(originalWidth, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(originalHeight / 2, View.MeasureSpec.EXACTLY))
+                    root.layout(0, 0, originalWidth, originalHeight / 2)
+                    val afterResize = canvas.crop()!!
+                    expect(canvas.height == originalCanvasHeight, "IME resize changed screenshot canvas height")
+                    expect(beforeResize.width == afterResize.width && beforeResize.height == afterResize.height, "IME resize changed selected crop geometry")
+                    beforeResize.recycle(); afterResize.recycle()
+                    root.measure(View.MeasureSpec.makeMeasureSpec(originalWidth, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(originalHeight, View.MeasureSpec.EXACTLY))
+                    root.layout(0, 0, originalWidth, originalHeight)
+                    expect(captured.isEmpty(), "selection sends without confirmation")
+                    expect(descendants(root).filterIsInstance<Button>().none { it.text in listOf("AI 解题", "讲知识点", "预览选区") }, "old mandatory action buttons remain")
+                    descendants(root).filterIsInstance<EditText>().first().setText("只翻译这句话")
+                    button(root, "确认").performClick()
+                    expect(captured == "只翻译这句话", "confirmation loses optional request")
+                    captured = "already-sent"
+                    button(root, "确认").performClick()
+                    expect(captured == "already-sent", "double confirmation sends twice")
                     root.release()
                 }
                 val prompts = AiPromptStore(context)
@@ -194,10 +210,10 @@ internal class AiPresentationChecks(private val instrument: Instrumentation) {
                     activity.setContentView(promptView)
                     button(promptView, "恢复默认").performClick()
                     val editors = descendants(promptView).filterIsInstance<EditText>()
-                    expect(editors.map { it.text.toString() } == listOf(AiPrompts.DEFAULT_SYSTEM, AiPrompts.DEFAULT_SOLVE, AiPrompts.DEFAULT_EXPLAIN),
+                    expect(editors.size == 2 && editors.first().text.toString() == AiPrompts.DEFAULT_SYSTEM,
                         "restore defaults did not update all prompt fields")
                     button(promptView, "保存").performClick()
-                    expect(saved && prompts.load() == AiPrompts(), "prompt settings did not persist restored defaults")
+                    expect(saved && prompts.load().system == AiPrompts.DEFAULT_SYSTEM && prompts.load().automatic == AiPrompts.DEFAULT_AUTOMATIC, "prompt settings did not persist restored defaults")
                 }
             }
         } finally {

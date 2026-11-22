@@ -10,14 +10,14 @@ internal data class AiChunk(val text: String = "", val thinking: Boolean = false
 internal object AiWire {
     const val SYSTEM = AiPrompts.DEFAULT_SYSTEM
 
-    fun body(profile: AiProfile, history: List<AiTurn>, question: String, image: AiImage, systemPrompt: String = SYSTEM): JSONObject {
+    fun body(profile: AiProfile, history: List<AiTurn>, question: String, image: AiImage?, systemPrompt: String = SYSTEM): JSONObject {
         val turns = history + AiTurn("user", question)
         val root = when (profile.protocol) {
             AiProtocol.CHAT -> JSONObject().put("model", profile.model).put("stream", profile.stream).put("max_tokens", 4096).apply {
                 val messages = JSONArray()
                 if (systemPrompt.isNotBlank()) messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
                 turns.forEachIndexed { index, turn ->
-                    val content: Any = if (index == 0) JSONArray()
+                    val content: Any = if (index == 0 && image != null) JSONArray()
                         .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:${image.mimeType};base64,${image.data}")))
                         .put(JSONObject().put("type", "text").put("text", turn.text)) else turn.text
                     messages.put(JSONObject().put("role", turn.role).put("content", content))
@@ -29,7 +29,7 @@ internal object AiWire {
                     val contents = JSONArray()
                     turns.forEachIndexed { index, turn ->
                         val parts = JSONArray()
-                        if (index == 0) parts.put(JSONObject().put("inlineData", JSONObject().put("mimeType", image.mimeType).put("data", image.data)))
+                        if (index == 0 && image != null) parts.put(JSONObject().put("inlineData", JSONObject().put("mimeType", image.mimeType).put("data", image.data)))
                         parts.put(JSONObject().put("text", turn.text))
                         contents.put(JSONObject().put("role", if (turn.role == "assistant") "model" else "user").put("parts", parts))
                     }
@@ -41,7 +41,7 @@ internal object AiWire {
                     val messages = JSONArray()
                     turns.forEachIndexed { index, turn ->
                         val parts = JSONArray()
-                        if (index == 0) parts.put(JSONObject().put("type", "image").put("source", JSONObject()
+                        if (index == 0 && image != null) parts.put(JSONObject().put("type", "image").put("source", JSONObject()
                             .put("type", "base64").put("media_type", image.mimeType).put("data", image.data)))
                         parts.put(JSONObject().put("type", "text").put("text", turn.text))
                         messages.put(JSONObject().put("role", turn.role).put("content", parts))

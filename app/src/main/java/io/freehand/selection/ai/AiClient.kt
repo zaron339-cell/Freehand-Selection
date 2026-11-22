@@ -29,11 +29,16 @@ internal object AiClient {
     private val clock = Executors.newSingleThreadScheduledExecutor()
     private val main = Handler(Looper.getMainLooper())
 
+    fun askText(profile: AiProfile, system: String, text: String, done: (String) -> Unit, failed: (String) -> Unit): AiCall =
+        ask(profile, emptyList(), text, null, {}, {}, { answer, reason ->
+            if (reason in setOf("length", "MAX_TOKENS", "max_tokens")) failed("后台提炼达到输出上限") else done(answer)
+        }, failed, system)
+
     fun ask(
         profile: AiProfile,
         history: List<AiTurn>,
         question: String,
-        image: Bitmap,
+        image: Bitmap?,
         onStage: (String) -> Unit,
         onText: (String) -> Unit,
         onComplete: (String, String) -> Unit,
@@ -48,7 +53,7 @@ internal object AiClient {
         val link = java.util.concurrent.atomic.AtomicReference<HttpURLConnection?>()
         var deadline: ScheduledFuture<*>? = null
         // Bitmap ownership is independent of the overlay; closing it cannot race image compression.
-        val ownedImage = image.copy(Bitmap.Config.ARGB_8888, false)
+        val ownedImage = image?.copy(Bitmap.Config.ARGB_8888, false)
         fun stage(value: String) = main.post { if (!ended.get()) onStage(value) }
         fun fail(value: String) {
             if (ended.compareAndSet(false, true)) {
@@ -65,7 +70,7 @@ internal object AiClient {
             var connection: HttpURLConnection? = null
             try {
                 stage("正在准备选区图片…")
-                val encoded = try { encode(ownedImage) } finally { ownedImage.recycle() }
+                val encoded = if (ownedImage == null) null else try { encode(ownedImage) } finally { ownedImage.recycle() }
                 if (canceled.get()) return@execute
                 val payload = AiWire.body(profile, history, question, encoded, systemPrompt).toString().toByteArray(Charsets.UTF_8)
                 stage("正在连接 ${profile.host}…")
@@ -156,7 +161,7 @@ internal object AiClient {
                     else -> error.localizedMessage ?: "请求失败，请检查模型配置"
                 })
             } finally {
-                if (!ownedImage.isRecycled) ownedImage.recycle()
+                if (ownedImage != null && !ownedImage.isRecycled) ownedImage.recycle()
                 connection?.disconnect()
                 link.set(null)
             }

@@ -15,8 +15,7 @@ import io.freehand.selection.ai.AiPromptStore
 internal class AiPromptSettingsView(context: Context, onClose: () -> Unit) : ScrollView(context) {
     private val store = AiPromptStore(context)
     private val system = editor()
-    private val solve = editor()
-    private val explain = editor()
+    private val automatic = editor()
     private val status = context.label("保存后用于后续请求。自动首问只发送给模型，不显示在聊天里。", 14f)
 
     init {
@@ -32,11 +31,9 @@ internal class AiPromptSettingsView(context: Context, onClose: () -> Unit) : Scr
         column.addSpaced(context.label("通用提示词（所有模型）", 16f, true))
         column.addSpaced(system)
         column.addSpaced(context.label("通用提示词留空时，不发送系统提示词。", 13f))
-        column.addSpaced(context.label("AI 解题按钮提示词", 16f, true))
-        column.addSpaced(solve)
-        column.addSpaced(context.label("讲知识点按钮提示词", 16f, true))
-        column.addSpaced(explain)
-        column.addSpaced(context.label("按钮提示词留空时使用对应的简短默认值。手动追问由你直接输入。", 13f))
+        column.addSpaced(context.label("截图自动首问（未填写补充需求时）", 16f, true))
+        column.addSpaced(automatic)
+        column.addSpaced(context.label("留空使用简短默认值；截图时填写的需求优先。", 13f))
         column.addSpaced(status)
         val actions = context.row()
         actions.addWeighted(context.action("返回") { onClose() })
@@ -45,7 +42,7 @@ internal class AiPromptSettingsView(context: Context, onClose: () -> Unit) : Scr
             status.text = "已填入默认提示词，点击保存后生效"
         })
         actions.addWeighted(context.action("保存", true) {
-            runCatching { store.save(AiPrompts(system.text.toString(), solve.text.toString(), explain.text.toString())) }
+            runCatching { store.save(store.load().copy(system = system.text.toString(), automatic = automatic.text.toString())) }
                 .onSuccess {
                     context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
                     onClose()
@@ -78,7 +75,6 @@ internal class AiPromptSettingsView(context: Context, onClose: () -> Unit) : Scr
 
     private fun fill(prompts: AiPrompts) {
         system.setText(prompts.system)
-        solve.setText(prompts.solve)
-        explain.setText(prompts.explain)
+        automatic.setText(prompts.automatic)
     }
 }

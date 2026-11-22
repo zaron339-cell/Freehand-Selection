@@ -28,6 +28,7 @@
         <activity android:name=".AiSettingsActivity" android:exported="false" android:resizeableActivity="true" />
         <activity android:name=".AiPromptSettingsActivity" android:exported="false" android:resizeableActivity="true" />
         <activity android:name=".HistoryActivity" android:exported="false" android:resizeableActivity="true" />
+        <activity android:name=".MemorySettingsActivity" android:exported="false" android:resizeableActivity="true" />
         <service
             android:name=".CaptureService"
             android:exported="false"

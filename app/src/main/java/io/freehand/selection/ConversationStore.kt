@@ -25,6 +25,7 @@ internal data class ConversationRecord(
     val turns: List<AiTurn>, val profileId: String, val question: String,
     val hidden: Boolean, val assistantName: String, val partial: String,
     val pending: Boolean, val draft: String, val frame: WindowFrame?,
+    val summary: String = "", val summaryThrough: Int = 0,
 ) {
     val title: String get() = (turns.firstOrNull { it.role == "assistant" }?.text
         ?: initialQuestion).replace(Regex("[#*`\\n\\r]+"), " ").take(70)
@@ -35,6 +36,7 @@ internal data class ConversationRecord(
             .put("text", it.text).put("hidden", it.hidden).put("assistantName", it.assistantName)) } })
         .put("question", question).put("hidden", hidden).put("assistantName", assistantName)
         .put("partial", partial).put("pending", pending).put("draft", draft)
+        .put("summary", summary).put("summaryThrough", summaryThrough)
         .put("frame", frame?.let { JSONObject().put("x", it.x).put("y", it.y)
             .put("width", it.width).put("height", it.height) })
 
@@ -46,13 +48,15 @@ internal data class ConversationRecord(
                 (0 until turns.length()).map { turns.getJSONObject(it).let { t -> AiTurn(t.getString("role"),
                     t.getString("text"), t.optBoolean("hidden"), t.optString("assistantName")) } },
                 j.getString("profileId"), j.optString("question"), j.optBoolean("hidden"),
-                j.optString("assistantName"), j.optString("partial"), j.optBoolean("pending"), j.optString("draft"), frame)
+                j.optString("assistantName"), j.optString("partial"), j.optBoolean("pending"), j.optString("draft"), frame,
+                j.optString("summary"), j.optInt("summaryThrough").coerceIn(0, turns.length()))
         }
     }
 }
 
 /** All disk operations run on one queue. Atomic metadata always points at an already committed image. */
 internal class ConversationStore(context: Context) {
+    private val memories = io.freehand.selection.ai.UserMemoryStore(context)
     private val directory = File(context.filesDir, "conversations")
     private fun file(id: String, extension: String): File {
         require(id.matches(Regex("[a-zA-Z0-9-]{1,80}")))
@@ -86,6 +90,7 @@ internal class ConversationStore(context: Context) {
     fun delete(id: String) {
         // Keep a tiny tombstone so a still-open panel cannot resurrect a deleted conversation.
         atomic(file(id, "deleted")) { it.write(1) }
+        memories.removeSource(id)
         AtomicFile(file(id, "json")).delete()
         AtomicFile(file(id, "png")).delete()
     }

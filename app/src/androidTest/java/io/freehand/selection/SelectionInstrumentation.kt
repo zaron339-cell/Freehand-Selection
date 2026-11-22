@@ -92,7 +92,7 @@ class SelectionInstrumentation : Instrumentation() {
             try { count += AiIntegrationChecks(this).run() } catch (error: Throwable) { failure = error }
         }
         if (failure == null) {
-            try { count += HistoryChecks(this).run(); count += AiPresentationChecks(this).run() } catch (error: Throwable) { failure = error }
+            try { count += HistoryChecks(this).run(); count += MemoryChecks.run(targetContext); count += MemoryFlowChecks(this).run(); count += AiPresentationChecks(this).run() } catch (error: Throwable) { failure = error }
         }
         val result = Bundle().apply {
             putString("stream", if (failure == null) "$count Android input/raster and AI checks passed.\n"

@@ -74,6 +74,7 @@ class MainActivity : Activity() {
             startActivity(Intent(this, AiSettingsActivity::class.java))
         })
         card.addSpaced(action("历史对话") { startActivity(Intent(this, HistoryActivity::class.java)) })
+        card.addSpaced(action("用户记忆") { startActivity(Intent(this, MemorySettingsActivity::class.java)) })
         card.addSpaced(action("提示词设置") {
             startActivity(Intent(this, AiPromptSettingsActivity::class.java))
         })
@@ -83,9 +84,9 @@ class MainActivity : Activity() {
         })
         column.addSpaced(card)
         column.addSpaced(label("怎么使用", 18f, true))
-        column.addSpaced(label("1  在模型设置中填写自己的 API Key\n2  开启悬浮球，切到 PDF 或学习应用\n3  用笔或手指选区，预览确认\n4  点 AI 解题或讲知识点，支持继续追问", 15f))
+        column.addSpaced(label("1  在模型设置中填写自己的 API Key\n2  开启悬浮球，切到 PDF 或学习应用\n3  用笔或手指选区，可在下方补充需求\n4  点确认直接发送，支持继续追问", 15f))
         column.addSpaced(label("当前版本", 18f, true))
-        column.addSpaced(label("仅在点 AI 提问后，才会把确认的选区与本次对话发给当前模型接口。默认提供智谱免费视觉模型预设；需要自己的 Key，受平台限流。可保存多份自定义 API 配置并切换。", 14f))
+        column.addSpaced(label("点击确认后，将选区、需求和相关记忆发给当前模型接口。记忆与历史保存在本机；自动提炼会额外发送必要对话文本，可在用户记忆中关闭。需要自己的 API Key。", 14f))
         column.addSpaced(label("系统会显示屏幕共享提示。锁屏、系统停止共享或应用被结束后，请重新开启会话。部分应用会禁止截屏。", 14f))
         scroll.setOnApplyWindowInsetsListener { view, insets ->
             if (Build.VERSION.SDK_INT >= 30) {
@@ -164,11 +165,11 @@ class MainActivity : Activity() {
     }
 
     private fun showPractice() {
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         val overlay = SelectionOverlay(this, practiceImage(),
             onClose = { closePractice() },
-            onShare = { bitmap, completed -> ImageSharing.share(this, bitmap, completed) },
-            onAsk = { bitmap, question ->
-                val answer = AiConversationView(this, bitmap, question) { closePracticeAnswer() }
+            onAsk = { bitmap, question, hidden ->
+                val answer = AiConversationView(this, bitmap, question, hiddenInitial = hidden) { closePracticeAnswer() }
                 practiceAnswer = answer
                 setContentView(answer)
             })

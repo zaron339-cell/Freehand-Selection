@@ -30,7 +30,7 @@ internal class HistoryChecks(private val instrumentation: Instrumentation) {
                 "Restored question image changed")
             restoredImage.recycle()
             expect(store.list().single().id == id, "New store cannot discover saved history")
-            val next = record.copy(updated = 124, pending = false, partial = "", draft = "")
+            val next = record.copy(updated = 124, pending = false, partial = "", draft = "", summary = "此前讨论事实", summaryThrough = 2)
             store.save(next)
             val (updated, updatedImage) = store.load(id)
             updatedImage.recycle()

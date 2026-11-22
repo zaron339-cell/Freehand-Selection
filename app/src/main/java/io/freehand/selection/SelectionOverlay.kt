@@ -10,8 +10,11 @@ import android.view.View
 import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.Button
-import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.EditText
+import android.text.InputFilter
+import android.text.InputType
+import android.view.inputmethod.InputMethodManager
 import io.freehand.selection.geometry.SelectionMode
 import io.freehand.selection.ai.AiProfileStore
 import io.freehand.selection.ai.AiPromptStore
@@ -20,26 +23,22 @@ internal class SelectionOverlay(
     context: Context,
     private val screenshot: Bitmap,
     private val onClose: () -> Unit,
-    private val onShare: (Bitmap, (String?) -> Unit) -> Unit,
-    private val onAsk: (Bitmap, String) -> Unit,
+    private val onAsk: (Bitmap, String, Boolean) -> Unit,
 ) : FrameLayout(context) {
     private val preferences = context.getSharedPreferences("selection", Context.MODE_PRIVATE)
     private val canvas = SelectionCanvas(context, screenshot)
-    private val image = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.FIT_CENTER
-        setBackgroundColor(paper)
-        visibility = View.GONE
-        contentDescription = "实际选区预览，圈外内容已填白"
-    }
     private val status = context.label("用笔或手指圈选内容，松手自动闭合", 14f)
     private val modes = context.row()
     private val freehand = context.action("自由圈选") { chooseMode(SelectionMode.FREEHAND) }
     private val rectangle = context.action("矩形框选") { chooseMode(SelectionMode.RECTANGLE) }
-    private val preview = context.action("预览选区", true) { showPreview() }
-    private val share: Button = context.action("分享图片", true) { sharePreview() }
-    private val aiActions = context.row().apply {
-        addWeighted(context.action("AI 解题", true) { ask(AiPromptStore(context).load().solve) })
-        addWeighted(context.action("讲知识点", true) { ask(AiPromptStore(context).load().explain) })
+    private val preview = context.action("确认", true) { confirmSelection() }
+    private val requirement = EditText(context).apply {
+        hint = "补充需求（可选），例如：翻译、解释原因"
+        textSize = 14f
+        setTextColor(ink)
+        maxLines = 3
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        filters = arrayOf(InputFilter.LengthFilter(6000))
     }
     private val modelButton = context.action("模型与接口") { openSettings() }
     private val promptButton = context.action("提示词") { openPrompts() }
@@ -63,12 +62,17 @@ internal class SelectionOverlay(
     private var released = false
     private var settings: AiSettingsView? = null
     private var promptSettings: AiPromptSettingsView? = null
+    private var sent = false
+    private var pendingQuestion: Pair<String, Boolean>? = null
+    private var canvasWidth = 0
+    private var canvasHeight = 0
+    private var imeInset = 0
+    private var navigationInset = 0
 
     init {
         isFocusableInTouchMode = true
         setBackgroundColor(Color.rgb(23, 31, 29))
         addView(canvas, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        addView(image, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         topPanel.addView(context.label("圈选 · Freehand", 16f, true))
         modes.addWeighted(freehand)
         modes.addWeighted(rectangle)
@@ -79,11 +83,10 @@ internal class SelectionOverlay(
         })
         bottomPanel.addView(status)
         bottomPanel.addView(modelRow, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, context.dp(36)))
-        bottomPanel.addView(aiActions, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, context.dp(36)))
+        bottomPanel.addView(requirement)
         val actions = context.row()
         actions.addWeighted(context.action("关闭") { onClose() })
         actions.addWeighted(preview)
-        actions.addWeighted(share)
         bottomPanel.addView(actions)
         addView(bottomPanel, LayoutParams(context.dp(460), LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
             setMargins(context.dp(12), 0, context.dp(12), context.dp(12))
@@ -92,13 +95,11 @@ internal class SelectionOverlay(
         compact(bottomPanel)
         draggable(topPanel.getChildAt(0), topPanel)
         draggable(status, bottomPanel)
-        share.visibility = View.GONE
-        aiActions.visibility = View.GONE
-        modelRow.visibility = View.GONE
         canvas.onSelectionChanged = { valid ->
+            if (!valid) sent = false
             preview.isEnabled = valid
             preview.alpha = if (valid) 1f else .45f
-            status.text = if (valid) "选区已就绪，可预览或重新画" else "用笔或手指选择，松手后可预览"
+            status.text = if (valid) "选区已就绪，可补充需求后确认，或重新画" else "用笔或手指选择内容，再点确认"
         }
         val saved = preferences.getString("mode", SelectionMode.FREEHAND.name)
         chooseMode(SelectionMode.entries.firstOrNull { it.name == saved } ?: SelectionMode.FREEHAND)
@@ -109,6 +110,7 @@ internal class SelectionOverlay(
             val insetRight: Int
             if (Build.VERSION.SDK_INT >= 30) {
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                imeInset = insets.getInsets(WindowInsets.Type.ime()).bottom
                 insetTop = bars.top; insetBottom = bars.bottom; insetLeft = bars.left; insetRight = bars.right
             } else {
                 @Suppress("DEPRECATION")
@@ -117,6 +119,7 @@ internal class SelectionOverlay(
                     insetLeft = insets.systemWindowInsetLeft; insetRight = insets.systemWindowInsetRight
                 }
             }
+            navigationInset = insetBottom
             (topPanel.layoutParams as LayoutParams).apply {
                 topMargin = context.dp(12) + insetTop
                 leftMargin = context.dp(12) + insetLeft
@@ -131,6 +134,7 @@ internal class SelectionOverlay(
             }
             insets
         }
+        canvas.requestFocus()
     }
 
     private fun compact(view: View) {
@@ -147,7 +151,6 @@ internal class SelectionOverlay(
         handle.contentDescription = "拖动工具条"
         var dx = 0f; var dy = 0f
         handle.setOnTouchListener { _, event ->
-            if (image.visibility == View.VISIBLE) return@setOnTouchListener false
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> { dx = event.rawX - panel.x; dy = event.rawY - panel.y }
                 android.view.MotionEvent.ACTION_MOVE -> {
@@ -169,42 +172,49 @@ internal class SelectionOverlay(
         rectangle.isSelected = mode == SelectionMode.RECTANGLE
     }
 
-    private fun sharePreview() {
-        previewBitmap?.let { bitmap ->
-            share.isEnabled = false
-            status.text = "正在准备图片…"
-            onShare(bitmap) { error ->
-                if (!released) {
-                    share.isEnabled = true
-                    status.text = error ?: "图片已准备好，可在分享面板中选择应用"
-                }
-            }
-        }
-    }
-
     private fun refreshModel() {
         val profile = AiProfileStore(context).active()
         modelButton.text = "${profile.name} · 设置 / 切换"
         previewBitmap?.let { status.text = "${it.width} × ${it.height} · 提问后仅发送此选区至 ${profile.host}" }
     }
 
-    private fun ask(question: String) {
+    private fun confirmSelection() {
+        if (sent || released || settings != null || promptSettings != null) return
+        val result = canvas.crop() ?: return
+        previewBitmap?.recycle()
+        previewBitmap = result
+        val text = requirement.text.toString().trim()
+        val request = text.ifEmpty { AiPromptStore(context).load().automatic }
+        ask(request, text.isEmpty())
+    }
+
+    private fun ask(question: String, hidden: Boolean) {
         val bitmap = previewBitmap ?: return
+        if (sent || released) return
         val profile = AiProfileStore(context).active()
         if (profile.keyUnavailable || (profile.apiKey.isBlank() && profile.id in setOf("zhipu-free", "deepseek", "gemini"))) {
+            pendingQuestion = question to hidden
             openSettings()
             return
         }
         val error = runCatching { profile.validate() }.exceptionOrNull()
         if (error != null) { status.text = error.localizedMessage; return }
-        onAsk(bitmap, question)
+        sent = true
+        pendingQuestion = null
+        preview.isEnabled = false
+        context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(windowToken, 0)
+        onAsk(bitmap, question, hidden)
     }
 
     private fun openSettings() {
         if (settings != null || promptSettings != null || released) return
-        val view = AiSettingsView(context) {
+        val resume = pendingQuestion
+        val view = AiSettingsView(context, onSaved = {
+            if (resume != null && !released) ask(resume.first, resume.second)
+        }) {
             settings?.let { removeView(it) }
             settings = null
+            pendingQuestion = null
             refreshModel()
         }
         settings = view
@@ -224,61 +234,41 @@ internal class SelectionOverlay(
     }
 
     private fun reset() {
-        image.setImageDrawable(null)
         previewBitmap?.recycle()
         previewBitmap = null
         canvas.visibility = View.VISIBLE
-        image.visibility = View.GONE
         preview.visibility = View.VISIBLE
         compact(topPanel)
         compact(bottomPanel)
         draggable(topPanel.getChildAt(0), topPanel)
         draggable(status, bottomPanel)
-        share.visibility = View.GONE
-        aiActions.visibility = View.GONE
-        modelRow.visibility = View.GONE
+        sent = false
         canvas.clearSelection()
     }
 
-    private fun showPreview() {
-        val result = canvas.crop() ?: return
-        // Preview has a dedicated space between controls; return moved selection bars to their docks.
-        for (panel in listOf(topPanel, bottomPanel)) { panel.translationX = 0f; panel.translationY = 0f }
-        previewBitmap = result
-        image.setImageBitmap(result)
-        canvas.visibility = View.GONE
-        image.visibility = View.VISIBLE
-        // Keep the entire cropped image visible between controls, rather than behind them.
-        (image.layoutParams as LayoutParams).apply {
-            topMargin = topPanel.bottom + context.dp(12)
-            bottomMargin = height - bottomPanel.top + context.dp(12)
-            image.layoutParams = this
-        }
-        preview.visibility = View.GONE
-        share.visibility = View.VISIBLE
-        aiActions.visibility = View.VISIBLE
-        modelRow.visibility = View.VISIBLE
-        refreshModel()
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        // Resize the controls for the IME, but keep the screenshot's coordinate system intact.
+        if (canvasWidth != measuredWidth) { canvasWidth = measuredWidth; canvasHeight = measuredHeight }
+        else canvasHeight = maxOf(canvasHeight, measuredHeight)
+        canvas.measure(MeasureSpec.makeMeasureSpec(canvasWidth, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(canvasHeight, MeasureSpec.EXACTLY))
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        // Only the cropped preview fits between controls; selection uses the full screenshot.
+        val bottomParams = bottomPanel.layoutParams as LayoutParams
+        val keyboardOverlap = (imeInset - (canvasHeight - height).coerceAtLeast(0)).coerceAtLeast(0)
+        val bottomMargin = context.dp(12) + maxOf(navigationInset, keyboardOverlap)
+        if (bottomParams.bottomMargin != bottomMargin) {
+            bottomParams.bottomMargin = bottomMargin; bottomPanel.layoutParams = bottomParams
+        }
+        // Keep the screenshot mapping unchanged while fitting controls to the screen width.
         for (panel in listOf(topPanel, bottomPanel)) {
             val lp = panel.layoutParams as LayoutParams
             val maximum = (width - paddingLeft - paddingRight - lp.leftMargin - lp.rightMargin).coerceAtLeast(1)
             val desired = minOf(context.dp(if (panel === topPanel) 340 else 460), maximum)
             if (lp.width != desired) { lp.width = desired; panel.layoutParams = lp }
-        }
-        val upper = this.topPanel.bottom + context.dp(8)
-        val lower = height - this.bottomPanel.top + context.dp(8)
-        for (view in listOf(image)) {
-            val params = view.layoutParams as LayoutParams
-            if (params.topMargin != upper || params.bottomMargin != lower) {
-                params.topMargin = upper
-                params.bottomMargin = lower
-                view.layoutParams = params
-            }
         }
     }
 
@@ -302,10 +292,10 @@ internal class SelectionOverlay(
     fun release() {
         if (released) return
         released = true
+        visibility = View.GONE
         settings?.dispose()
         settings = null
         promptSettings = null
-        image.setImageDrawable(null)
         previewBitmap?.recycle()
         previewBitmap = null
         screenshot.recycle()
